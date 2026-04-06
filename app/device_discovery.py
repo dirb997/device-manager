@@ -4,6 +4,7 @@ import json
 import platform
 import re
 import subprocess
+import shutil
 from datetime import datetime
 from typing import Any, Iterable, List
 
@@ -21,6 +22,33 @@ def _run_command(cmd: list[str], timeout: int = 5) -> subprocess.CompletedProces
         )
     except (FileNotFoundError, subprocess.SubprocessError):
         return None
+
+
+def _make_device(
+    *,
+    device_id: str,
+    name: str,
+    imei: str,
+    connection_type: str,
+    battery_level: int = 0,
+    is_charging: bool = False,
+    battery_display: str = "",
+) -> Device:
+    now = datetime.utcnow()
+    if not battery_display:
+        battery_display = "No battery input" if connection_type == "bluetooth" else (f"{battery_level}%" if battery_level > 0 else "")
+    return Device(
+        id=device_id,
+        name=name,
+        imei=imei,
+        connection_type=connection_type,
+        status=DeviceStatus.CONNECTED,
+        battery_level=battery_level,
+        battery_display=battery_display,
+        is_charging=is_charging,
+        last_seen=now,
+        connected_at=now,
+    )
 
 
 def _parse_android_battery(serial: str) -> tuple[int, bool]:
@@ -119,7 +147,6 @@ def discover_android_devices() -> List[Device]:
         return []
 
     devices: List[Device] = []
-    now = datetime.utcnow()
 
     for line in result.stdout.splitlines():
         line = line.strip()
@@ -146,15 +173,13 @@ def discover_android_devices() -> List[Device]:
         battery_level, is_charging = _parse_android_battery(serial)
 
         devices.append(
-            Device(
-                id=f"adb-{serial}",
+            _make_device(
+                device_id=f"adb-{serial}",
                 name=model,
                 imei=serial,
-                status=DeviceStatus.CONNECTED,
+                connection_type="usb",
                 battery_level=battery_level,
                 is_charging=is_charging,
-                last_seen=now,
-                connected_at=now,
             )
         )
 
@@ -191,7 +216,6 @@ def discover_apple_mobile_devices() -> List[Device]:
         return []
 
     devices: List[Device] = []
-    now = datetime.utcnow()
     keywords = ("iphone", "ipad", "ipod")
 
     for item in _walk_usb_items(usb_roots):
@@ -209,15 +233,13 @@ def discover_apple_mobile_devices() -> List[Device]:
         battery_level, is_charging = _parse_apple_battery(serial)
 
         devices.append(
-            Device(
-                id=f"apple-{identifier}",
+            _make_device(
+                device_id=f"apple-{identifier}",
                 name=name,
                 imei=serial or identifier,
-                status=DeviceStatus.CONNECTED,
+                connection_type="usb",
                 battery_level=battery_level,
                 is_charging=is_charging,
-                last_seen=now,
-                connected_at=now,
             )
         )
 
@@ -237,7 +259,6 @@ def discover_macos_usb_devices() -> List[Device]:
         return []
 
     devices: List[Device] = []
-    now = datetime.utcnow()
 
     blocks = result.stdout.split("+-o ")
     for block in blocks:
@@ -268,18 +289,145 @@ def discover_macos_usb_devices() -> List[Device]:
             battery_level, is_charging = _parse_apple_battery(serial)
 
         devices.append(
-            Device(
-                id=f"usb-{identifier}",
+            _make_device(
+                device_id=f"usb-{identifier}",
                 name=raw_name,
                 imei=serial or identifier,
-                status=DeviceStatus.CONNECTED,
+                connection_type="usb",
                 battery_level=battery_level,
                 is_charging=is_charging,
-                last_seen=now,
-                connected_at=now,
             )
         )
 
     # Deduplicate by ID if ioreg repeats entries.
     unique: dict[str, Device] = {d.id: d for d in devices}
     return list(unique.values())
+
+
+def discover_wifi_devices() -> List[Device]:
+    """Discover nearby Wi-Fi devices from the local ARP cache on macOS."""
+    if platform.system() != "Darwin":
+        return []
+
+    arp_command = shutil.which("arp") or "/usr/sbin/arp"
+    result = _run_command([arp_command, "-a"], timeout=5)
+    if not result or result.returncode != 0:
+        return []
+
+    devices: List[Device] = []
+    seen_ids: set[str] = set()
+
+    for raw_line in result.stdout.splitlines():
+        line = raw_line.strip()
+        match = re.search(r"\(([^)]+)\) at ([0-9a-f:]+|\(incomplete\))", line, re.IGNORECASE)
+        if not match:
+            continue
+
+        ip_address = match.group(1).strip()
+        mac_address = match.group(2).strip().lower()
+        if mac_address == "(incomplete)" or mac_address == "00:00:00:00:00:00":
+            continue
+
+        hostname_match = re.match(r"^(.*?)\s*\(", line)
+        hostname = hostname_match.group(1).strip() if hostname_match else ""
+        display_name = hostname if hostname and hostname != "?" else f"Wi-Fi Device {ip_address}"
+        device_id = f"wifi-{mac_address.replace(':', '-')}"
+        if device_id in seen_ids:
+            continue
+
+        seen_ids.add(device_id)
+        devices.append(
+            _make_device(
+                device_id=device_id,
+                name=display_name,
+                imei=mac_address,
+                connection_type="wifi",
+            )
+        )
+
+    return devices
+
+
+def _iter_dicts(value: Any) -> Iterable[dict[str, Any]]:
+    if isinstance(value, dict):
+        yield value
+        for nested in value.values():
+            yield from _iter_dicts(nested)
+    elif isinstance(value, list):
+        for nested in value:
+            yield from _iter_dicts(nested)
+
+
+def _iter_bluetooth_connected_devices(payload: Any) -> Iterable[tuple[str, dict[str, Any]]]:
+    if not isinstance(payload, dict):
+        return
+
+    entries = payload.get("SPBluetoothDataType", [])
+    if not isinstance(entries, list):
+        return
+
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+
+        connected_devices = entry.get("device_connected", [])
+        if not isinstance(connected_devices, list):
+            continue
+
+        for device_item in connected_devices:
+            if not isinstance(device_item, dict) or len(device_item) != 1:
+                continue
+
+            [(device_name, device_details)] = device_item.items()
+            if isinstance(device_details, dict):
+                yield device_name, device_details
+
+
+def discover_bluetooth_devices() -> List[Device]:
+    """Discover paired or connected Bluetooth devices on macOS."""
+    if platform.system() != "Darwin":
+        return []
+
+    result = _run_command(["system_profiler", "SPBluetoothDataType", "-json"], timeout=8)
+    if not result or result.returncode != 0:
+        return []
+
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return []
+
+    devices: List[Device] = []
+    seen_ids: set[str] = set()
+
+    for name, item in _iter_bluetooth_connected_devices(payload):
+        name = str(name or item.get("device_name") or item.get("_name") or item.get("name") or "").strip()
+        if not name:
+            continue
+
+        address = str(
+            item.get("device_address")
+            or item.get("bd_addr")
+            or item.get("address")
+            or item.get("device_id")
+            or name
+        ).strip()
+        if not address:
+            continue
+
+        device_id = f"bluetooth-{re.sub(r'[^a-z0-9]+', '-', address.lower()).strip('-')}"
+        if device_id in seen_ids:
+            continue
+
+        seen_ids.add(device_id)
+        devices.append(
+            _make_device(
+                device_id=device_id,
+                name=name,
+                imei=address,
+                connection_type="bluetooth",
+                battery_display="No battery input",
+            )
+        )
+
+    return devices
