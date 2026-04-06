@@ -11,7 +11,7 @@ class Database:
     def __init__(self, database_url: str | None = None):
         self.database_url = database_url or os.getenv(
             "DATABASE_URL",
-            "postgresql://postgres:diego@localhost:5433/device_manager",
+            "postgresql://localhost:5433/device_manager",
         )
         self.init_db()
 
