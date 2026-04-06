@@ -10,8 +10,10 @@ class DeviceStatus(str, Enum):
 class DeviceBase(BaseModel):
     name: str
     imei: str
+    connection_type: str = "manual"
     is_charging: bool = False
     battery_level: int = 0  # 0-100
+    battery_display: str = ""
     
 class DeviceCreate(DeviceBase):
     pass

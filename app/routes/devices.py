@@ -6,12 +6,30 @@ from ..models import Device, DeviceCreate, DeviceStatus, BatteryUpdate
 from ..database import db
 from ..websocket.manager import manager
 from ..device_discovery import (
+    discover_bluetooth_devices,
     discover_android_devices,
     discover_apple_mobile_devices,
     discover_macos_usb_devices,
+    discover_wifi_devices,
 )
 
 router = APIRouter()
+
+
+def _merge_discovered_device(existing: Device | None, discovered: Device) -> Device:
+    if not existing:
+        return discovered
+
+    if discovered.battery_level == 0 and existing.battery_level > 0:
+        discovered = discovered.model_copy(
+            update={
+                "battery_level": existing.battery_level,
+                "is_charging": existing.is_charging,
+                "battery_display": existing.battery_display,
+            }
+        )
+
+    return discovered
 
 @router.get("/devices", response_model=List[Device])
 async def get_devices():
@@ -38,23 +56,28 @@ async def scan_devices():
         *discover_android_devices(),
         *discover_apple_mobile_devices(),
         *discover_macos_usb_devices(),
+        *discover_wifi_devices(),
+        *discover_bluetooth_devices(),
     ]
     discovered_ids = {d.id for d in discovered}
 
     existing = db.get_all_devices()
+    existing_by_id = {device.id: device for device in existing}
     for device in existing:
         if (
             (
                 device.id.startswith("adb-")
                 or device.id.startswith("apple-")
                 or device.id.startswith("usb-")
+                or device.id.startswith("wifi-")
+                or device.id.startswith("bluetooth-")
             )
             and device.id not in discovered_ids
         ):
             db.update_status(device.id, DeviceStatus.DISCONNECTED)
 
     for device in discovered:
-        db.upsert_device(device)
+        db.upsert_device(_merge_discovered_device(existing_by_id.get(device.id), device))
 
     return {
         "discovered": len(discovered),
@@ -69,8 +92,10 @@ async def connect_device(device: DeviceCreate):
         id=device_id,
         name=device.name,
         imei=device.imei,
+        connection_type="manual",
         status=DeviceStatus.CONNECTED,
         battery_level=device.battery_level,
+        battery_display=device.battery_display or (f"{device.battery_level}%" if device.battery_level > 0 else ""),
         is_charging=device.is_charging,
         last_seen=datetime.utcnow(),
         connected_at=datetime.utcnow()
@@ -121,6 +146,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     device.battery_level = update.battery_level
                     device.is_charging = update.is_charging
                     device.last_seen = datetime.utcnow()
+                    device.battery_display = f"{update.battery_level}%" if device.connection_type != "bluetooth" else "No battery input"
                     db.upsert_device(device)
                     
                     # Broadcast battery update to all UI clients
@@ -128,7 +154,8 @@ async def websocket_endpoint(websocket: WebSocket):
                         "type": "battery_update",
                         "device_id": update.device_id,
                         "battery_level": update.battery_level,
-                        "is_charging": update.is_charging
+                        "is_charging": update.is_charging,
+                        "battery_display": device.battery_display,
                     })
                     
     except WebSocketDisconnect:
