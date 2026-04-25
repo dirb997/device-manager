@@ -21,8 +21,12 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: device-manager-api
+    env_file:
+      - .env
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@db:5432/device_manager
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/device_manager}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-60}
     ports:
       - "8000:8000"
     depends_on:

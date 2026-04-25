@@ -1,11 +1,15 @@
 import os
+import uuid
 from datetime import datetime
 from typing import List, Optional
 
 import psycopg
+from dotenv import load_dotenv
 from psycopg.rows import dict_row
 
-from .models import Device, DeviceStatus
+from app.models import Device, DeviceStatus, UserPublic
+
+load_dotenv()
 
 class Database:
     def __init__(self, database_url: str | None = None):
@@ -33,6 +37,23 @@ class Database:
                     is_charging BOOLEAN DEFAULT FALSE,
                     last_seen TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                     connected_at TIMESTAMP WITHOUT TIME ZONE
+                )
+            """)
+                cursor.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id TEXT PRIMARY KEY,
+                    email TEXT UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+                cursor.execute("""
+                CREATE TABLE IF NOT EXISTS revoked_tokens (
+                    jti TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    expires_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+                    revoked_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
                 )
             """)
                 cursor.execute("""
@@ -78,7 +99,7 @@ class Database:
                 device.id,
                 device.name,
                 device.imei,
-                device.connection_type,
+                device.connection_type.value if hasattr(device.connection_type, "value") else device.connection_type,
                 device.status.value if hasattr(device.status, "value") else device.status,
                 device.battery_level,
                 getattr(device, "battery_display", ""),
@@ -87,6 +108,66 @@ class Database:
                 device.connected_at,
             ))
             conn.commit()
+
+    def create_user(self, email: str, password_hash: str) -> UserPublic:
+        user_id = str(uuid.uuid4())
+        with self._connect() as conn:
+            with conn.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO users (id, email, password_hash)
+                    VALUES (%s, %s, %s)
+                    RETURNING id, email, created_at
+                    """,
+                    (user_id, email, password_hash),
+                )
+                row = cursor.fetchone()
+            conn.commit()
+        if not row:
+            raise RuntimeError("Failed to create user")
+        return UserPublic(**dict(row))
+
+    def get_user_auth_by_email(self, email: str) -> Optional[dict]:
+        with self._connect() as conn:
+            with conn.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(
+                    "SELECT id, email, password_hash, created_at FROM users WHERE email = %s",
+                    (email,),
+                )
+                row = cursor.fetchone()
+                return dict(row) if row else None
+
+    def get_user_by_id(self, user_id: str) -> Optional[UserPublic]:
+        with self._connect() as conn:
+            with conn.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(
+                    "SELECT id, email, created_at FROM users WHERE id = %s",
+                    (user_id,),
+                )
+                row = cursor.fetchone()
+                return UserPublic(**dict(row)) if row else None
+
+    def revoke_token(self, jti: str, user_id: str, expires_at: datetime) -> None:
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO revoked_tokens (jti, user_id, expires_at)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (jti) DO NOTHING
+                    """,
+                    (jti, user_id, expires_at),
+                )
+            conn.commit()
+
+    def is_token_revoked(self, jti: str) -> bool:
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT 1 FROM revoked_tokens WHERE jti = %s LIMIT 1",
+                    (jti,),
+                )
+                return cursor.fetchone() is not None
     
     def update_status(self, device_id: str, status: DeviceStatus):
         with self._connect() as conn:
