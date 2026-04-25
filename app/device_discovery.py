@@ -8,7 +8,7 @@ import shutil
 from datetime import datetime
 from typing import Any, Iterable, List
 
-from .models import Device, DeviceStatus
+from app.models import ConnectionType, Device, DeviceStatus
 
 
 def _run_command(cmd: list[str], timeout: int = 5) -> subprocess.CompletedProcess[str] | None:
@@ -29,14 +29,14 @@ def _make_device(
     device_id: str,
     name: str,
     imei: str,
-    connection_type: str,
+    connection_type: ConnectionType,
     battery_level: int = 0,
     is_charging: bool = False,
     battery_display: str = "",
 ) -> Device:
     now = datetime.utcnow()
     if not battery_display:
-        battery_display = "No battery input" if connection_type == "bluetooth" else (f"{battery_level}%" if battery_level > 0 else "")
+        battery_display = "No battery input" if connection_type == ConnectionType.BLUETOOTH else (f"{battery_level}%" if battery_level > 0 else "")
     return Device(
         id=device_id,
         name=name,
@@ -177,7 +177,7 @@ def discover_android_devices() -> List[Device]:
                 device_id=f"adb-{serial}",
                 name=model,
                 imei=serial,
-                connection_type="usb",
+                connection_type=ConnectionType.USB,
                 battery_level=battery_level,
                 is_charging=is_charging,
             )
@@ -237,7 +237,7 @@ def discover_apple_mobile_devices() -> List[Device]:
                 device_id=f"apple-{identifier}",
                 name=name,
                 imei=serial or identifier,
-                connection_type="usb",
+                connection_type=ConnectionType.USB,
                 battery_level=battery_level,
                 is_charging=is_charging,
             )
@@ -293,7 +293,7 @@ def discover_macos_usb_devices() -> List[Device]:
                 device_id=f"usb-{identifier}",
                 name=raw_name,
                 imei=serial or identifier,
-                connection_type="usb",
+                connection_type=ConnectionType.USB,
                 battery_level=battery_level,
                 is_charging=is_charging,
             )
@@ -341,7 +341,7 @@ def discover_wifi_devices() -> List[Device]:
                 device_id=device_id,
                 name=display_name,
                 imei=mac_address,
-                connection_type="wifi",
+                connection_type=ConnectionType.WIFI,
             )
         )
 
@@ -425,7 +425,7 @@ def discover_bluetooth_devices() -> List[Device]:
                 device_id=device_id,
                 name=name,
                 imei=address,
-                connection_type="bluetooth",
+                connection_type=ConnectionType.BLUETOOTH,
                 battery_display="No battery input",
             )
         )

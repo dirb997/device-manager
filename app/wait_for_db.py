@@ -2,6 +2,9 @@ import os
 import time
 
 import psycopg
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 def wait_for_db(max_attempts: int = 30, delay_seconds: int = 2) -> None:

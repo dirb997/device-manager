@@ -1,11 +1,12 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from typing import List
 from datetime import datetime
 import uuid
-from ..models import Device, DeviceCreate, DeviceStatus, BatteryUpdate
-from ..database import db
-from ..websocket.manager import manager
-from ..device_discovery import (
+from app.auth import decode_access_token, get_current_user
+from app.models import BatteryUpdate, ConnectionType, Device, DeviceCreate, DeviceStatus, UserPublic
+from app.database import db
+from app.websocket.manager import manager
+from app.device_discovery import (
     discover_bluetooth_devices,
     discover_android_devices,
     discover_apple_mobile_devices,
@@ -32,25 +33,34 @@ def _merge_discovered_device(existing: Device | None, discovered: Device) -> Dev
     return discovered
 
 @router.get("/devices", response_model=List[Device])
-async def get_devices():
+async def get_devices(current_user: UserPublic = Depends(get_current_user)):
     """Get all devices (both connected and disconnected)"""
     return db.get_all_devices()
 
 @router.get("/devices/connected", response_model=List[Device])
-async def get_connected_devices():
+async def get_connected_devices(current_user: UserPublic = Depends(get_current_user)):
     """Get only connected devices with battery info"""
     devices = db.get_all_devices()
     return [d for d in devices if d.status == DeviceStatus.CONNECTED]
 
 @router.get("/devices/disconnected", response_model=List[Device])
-async def get_disconnected_devices():
+async def get_disconnected_devices(current_user: UserPublic = Depends(get_current_user)):
     """Get only disconnected devices"""
     devices = db.get_all_devices()
     return [d for d in devices if d.status == DeviceStatus.DISCONNECTED]
 
 
+@router.get("/devices/category/{connection_type}", response_model=List[Device])
+async def get_devices_by_category(
+    connection_type: ConnectionType,
+    current_user: UserPublic = Depends(get_current_user),
+):
+    devices = db.get_all_devices()
+    return [d for d in devices if d.connection_type == connection_type]
+
+
 @router.post("/devices/scan")
-async def scan_devices():
+async def scan_devices(current_user: UserPublic = Depends(get_current_user)):
     """Scan locally connected devices and sync them to the DB."""
     discovered = [
         *discover_android_devices(),
@@ -85,14 +95,17 @@ async def scan_devices():
     }
 
 @router.post("/devices/connect")
-async def connect_device(device: DeviceCreate):
+async def connect_device(
+    device: DeviceCreate,
+    current_user: UserPublic = Depends(get_current_user),
+):
     """Register or update a connected device"""
     device_id = str(uuid.uuid4())
     device_obj = Device(
         id=device_id,
         name=device.name,
         imei=device.imei,
-        connection_type="manual",
+        connection_type=device.connection_type,
         status=DeviceStatus.CONNECTED,
         battery_level=device.battery_level,
         battery_display=device.battery_display or (f"{device.battery_level}%" if device.battery_level > 0 else ""),
@@ -111,7 +124,10 @@ async def connect_device(device: DeviceCreate):
     return device_obj
 
 @router.post("/devices/{device_id}/disconnect")
-async def disconnect_device(device_id: str):
+async def disconnect_device(
+    device_id: str,
+    current_user: UserPublic = Depends(get_current_user),
+):
     """Mark device as disconnected"""
     db.update_status(device_id, DeviceStatus.DISCONNECTED)
     device = db.get_device(device_id)
@@ -127,6 +143,17 @@ async def disconnect_device(device_id: str):
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     device_id = None
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=1008, reason="Missing token")
+        return
+
+    try:
+        decode_access_token(token)
+    except Exception:
+        await websocket.close(code=1008, reason="Invalid token")
+        return
+
     await manager.connect(websocket)
     try:
         while True:
