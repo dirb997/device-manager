@@ -6,6 +6,7 @@ from enum import Enum
 class DeviceStatus(str, Enum):
     CONNECTED = "connected"
     DISCONNECTED = "disconnected"
+    UNREGISTERED = "unregistered"
 
 
 class ConnectionType(str, Enum):
@@ -31,6 +32,7 @@ class Device(DeviceBase):
     status: DeviceStatus
     last_seen: datetime
     connected_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
     
     class Config:
         from_attributes = True
@@ -39,6 +41,7 @@ class BatteryUpdate(BaseModel):
     device_id: str
     battery_level: int
     is_charging: bool
+    is_registered: bool
 
 
 class UserCreate(BaseModel):
@@ -55,6 +58,7 @@ class UserPublic(BaseModel):
     id: str
     email: str
     created_at: datetime
+    updated_at: datetime
 
 
 class TokenResponse(BaseModel):

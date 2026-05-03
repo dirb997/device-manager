@@ -36,7 +36,8 @@ class Database:
                     battery_display TEXT DEFAULT '',
                     is_charging BOOLEAN DEFAULT FALSE,
                     last_seen TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                    connected_at TIMESTAMP WITHOUT TIME ZONE
+                    connected_at TIMESTAMP WITHOUT TIME ZONE,
+                    updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
                 )
             """)
                 cursor.execute("""
@@ -44,7 +45,8 @@ class Database:
                     id TEXT PRIMARY KEY,
                     email TEXT UNIQUE NOT NULL,
                     password_hash TEXT NOT NULL,
-                    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
                 )
             """)
                 cursor.execute("""
@@ -63,6 +65,14 @@ class Database:
                 cursor.execute("""
                 ALTER TABLE devices
                 ADD COLUMN IF NOT EXISTS battery_display TEXT DEFAULT ''
+            """)
+                cursor.execute("""
+                ALTER TABLE devices
+                ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            """)
+                cursor.execute("""
+                ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
             """)
             conn.commit()
     
@@ -84,8 +94,8 @@ class Database:
         with self._connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute("""
-                INSERT INTO devices (id, name, imei, connection_type, status, battery_level, battery_display, is_charging, last_seen, connected_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO devices (id, name, imei, connection_type, status, battery_level, battery_display, is_charging, last_seen, connected_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT(id) DO UPDATE SET
                     name=excluded.name,
                     connection_type=excluded.connection_type,
@@ -95,6 +105,7 @@ class Database:
                     is_charging=excluded.is_charging,
                     last_seen=excluded.last_seen,
                     connected_at=excluded.connected_at
+                        ,updated_at=excluded.updated_at
             """, (
                 device.id,
                 device.name,
@@ -106,6 +117,7 @@ class Database:
                 device.is_charging,
                 device.last_seen,
                 device.connected_at,
+                device.updated_at
             ))
             conn.commit()
 
@@ -117,7 +129,7 @@ class Database:
                     """
                     INSERT INTO users (id, email, password_hash)
                     VALUES (%s, %s, %s)
-                    RETURNING id, email, created_at
+                    RETURNING id, email, created_at, updated_at
                     """,
                     (user_id, email, password_hash),
                 )
@@ -131,7 +143,7 @@ class Database:
         with self._connect() as conn:
             with conn.cursor(row_factory=dict_row) as cursor:
                 cursor.execute(
-                    "SELECT id, email, password_hash, created_at FROM users WHERE email = %s",
+                    "SELECT id, email, password_hash, created_at, updated_at FROM users WHERE email = %s",
                     (email,),
                 )
                 row = cursor.fetchone()
@@ -141,7 +153,7 @@ class Database:
         with self._connect() as conn:
             with conn.cursor(row_factory=dict_row) as cursor:
                 cursor.execute(
-                    "SELECT id, email, created_at FROM users WHERE id = %s",
+                    "SELECT id, email, created_at, updated_at FROM users WHERE id = %s",
                     (user_id,),
                 )
                 row = cursor.fetchone()
@@ -176,15 +188,15 @@ class Database:
                 if status == DeviceStatus.CONNECTED:
                     cursor.execute("""
                         UPDATE devices 
-                        SET status = %s, last_seen = %s, connected_at = %s
+                        SET status = %s, last_seen = %s, connected_at = %s, updated_at = %s
                         WHERE id = %s
-                    """, (status.value, now, now, device_id))
+                    """, (status.value, now, now, now, device_id))
                 else:
                     cursor.execute("""
                         UPDATE devices 
-                        SET status = %s, last_seen = %s
+                        SET status = %s, last_seen = %s, updated_at = %s
                         WHERE id = %s
-                    """, (status.value, now, device_id))
+                    """, (status.value, now, now, device_id))
             conn.commit()
 
 db = Database()

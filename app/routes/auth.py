@@ -41,12 +41,13 @@ async def login(payload: UserLogin):
     user_auth = db.get_user_auth_by_email(email)
 
     if not user_auth or not verify_password(payload.password, user_auth["password_hash"]):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials, try again")
 
     user = UserPublic(
         id=user_auth["id"],
         email=user_auth["email"],
         created_at=user_auth["created_at"],
+        updated_at=user_auth["updated_at"]
     )
     token, _, _ = create_access_token(user)
 
