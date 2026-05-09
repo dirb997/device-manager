@@ -47,6 +47,7 @@ class BatteryUpdate(BaseModel):
 class UserCreate(BaseModel):
     email: str
     password: str = Field(min_length=8, max_length=128)
+    language: str = Field(default='en', max_length=8)
 
 
 class UserLogin(BaseModel):
@@ -57,6 +58,7 @@ class UserLogin(BaseModel):
 class UserPublic(BaseModel):
     id: str
     email: str
+    language: str = 'en'
     created_at: datetime
     updated_at: datetime
 
