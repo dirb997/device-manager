@@ -32,7 +32,7 @@ async def register(payload: UserCreate):
         )
 
     password_hash = hash_password(payload.password)
-    return db.create_user(email=email, password_hash=password_hash)
+    return db.create_user(email=email, password_hash=password_hash, language=payload.language)
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -46,8 +46,9 @@ async def login(payload: UserLogin):
     user = UserPublic(
         id=user_auth["id"],
         email=user_auth["email"],
+        language=user_auth.get("language", "en"),
         created_at=user_auth["created_at"],
-        updated_at=user_auth["updated_at"]
+        updated_at=user_auth["updated_at"],
     )
     token, _, _ = create_access_token(user)
 

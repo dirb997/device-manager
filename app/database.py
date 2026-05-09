@@ -45,6 +45,7 @@ class Database:
                     id TEXT PRIMARY KEY,
                     email TEXT UNIQUE NOT NULL,
                     password_hash TEXT NOT NULL,
+                    language TEXT NOT NULL DEFAULT 'en',
                     created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
                 )
@@ -69,6 +70,10 @@ class Database:
                 cursor.execute("""
                 ALTER TABLE devices
                 ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            """)
+                cursor.execute("""
+                ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS language TEXT NOT NULL DEFAULT 'en'
             """)
                 cursor.execute("""
                 ALTER TABLE users
@@ -117,21 +122,22 @@ class Database:
                 device.is_charging,
                 device.last_seen,
                 device.connected_at,
-                device.updated_at
+                device.updated_at,
             ))
             conn.commit()
 
-    def create_user(self, email: str, password_hash: str) -> UserPublic:
+    def create_user(self, email: str, password_hash: str, language: str = 'en') -> UserPublic:
         user_id = str(uuid.uuid4())
+        user_language = (language or 'en').strip().lower()[:8] or 'en'
         with self._connect() as conn:
             with conn.cursor(row_factory=dict_row) as cursor:
                 cursor.execute(
                     """
-                    INSERT INTO users (id, email, password_hash)
-                    VALUES (%s, %s, %s)
-                    RETURNING id, email, created_at, updated_at
+                    INSERT INTO users (id, email, password_hash, language)
+                    VALUES (%s, %s, %s, %s)
+                    RETURNING id, email, language, created_at, updated_at
                     """,
-                    (user_id, email, password_hash),
+                    (user_id, email, password_hash, user_language),
                 )
                 row = cursor.fetchone()
             conn.commit()
@@ -143,7 +149,7 @@ class Database:
         with self._connect() as conn:
             with conn.cursor(row_factory=dict_row) as cursor:
                 cursor.execute(
-                    "SELECT id, email, password_hash, created_at, updated_at FROM users WHERE email = %s",
+                    "SELECT id, email, password_hash, language, created_at, updated_at FROM users WHERE email = %s",
                     (email,),
                 )
                 row = cursor.fetchone()
@@ -153,7 +159,7 @@ class Database:
         with self._connect() as conn:
             with conn.cursor(row_factory=dict_row) as cursor:
                 cursor.execute(
-                    "SELECT id, email, created_at, updated_at FROM users WHERE id = %s",
+                    "SELECT id, email, language, created_at, updated_at FROM users WHERE id = %s",
                     (user_id,),
                 )
                 row = cursor.fetchone()
