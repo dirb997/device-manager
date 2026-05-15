@@ -42,15 +42,15 @@ async def test_get_devices(client):
 
 
 @pytest.mark.integration
-async def test_create_device(client):
-    """Test creating a new device."""
+async def test_connect_device(client):
+    """Test connecting a device."""
     device_data = {
         "name": "Test Device",
         "imei": "123456789012345",
         "connection_type": "usb"
     }
-    response = await client.post("/api/devices", json=device_data)
-    assert response.status_code in [200, 201, 401, 422]
+    response = await client.post("/api/devices/connect", json=device_data)
+    assert response.status_code in [200, 401, 422]
 
 
 @pytest.mark.integration
