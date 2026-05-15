@@ -80,15 +80,6 @@ async def test_example(client):
     assert response.status_code == 200
 ```
 
-### `db_session`
-Fresh database session for each test (auto-rolled back).
-
-```python
-async def test_with_db(db_session):
-    # Use db_session for database queries
-    pass
-```
-
 ### `auth_headers`
 Pre-configured authentication headers for protected endpoints.
 
