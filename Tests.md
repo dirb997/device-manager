@@ -40,8 +40,8 @@ If you prefer to run tests locally, you need:
 
 2. **Set up test database:**
    ```bash
-   export TEST_DATABASE_URL="postgresql://postgres:postgres@localhost:5433/device_manager_test"
-   psql -U postgres -h localhost -p 5433 -c "CREATE DATABASE device_manager_test;"
+   export TEST_DATABASE_URL="postgresql://postgres:postgres@localhost:5434/device_manager_test"
+   psql -U postgres -h localhost -p 5434 -c "CREATE DATABASE device_manager_test;"
    ```
 
 3. **Run tests:**
