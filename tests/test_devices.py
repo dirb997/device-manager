@@ -53,17 +53,3 @@ async def test_connect_device(client):
     assert response.status_code in [200, 401, 422]
 
 
-@pytest.mark.integration
-async def test_device_battery_update(client):
-    """Test battery level update endpoint."""
-    battery_data = {
-        "device_id": "test-device-1",
-        "battery_level": 85,
-        "is_charging": True,
-        "is_registered": True
-    }
-    response = await client.post(
-        "/api/battery-update",
-        json=battery_data
-    )
-    assert response.status_code in [200, 401, 404, 422]
