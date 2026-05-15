@@ -16,6 +16,23 @@ services:
       timeout: 5s
       retries: 10
 
+  db-test:
+    image: postgres:16-alpine
+    container_name: device-manager-db-test
+    environment:
+      POSTGRES_DB: device_manager_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d device_manager_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   backend:
     build:
       context: .
@@ -33,5 +50,25 @@ services:
       db:
         condition: service_healthy
 
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: device-manager-test
+    env_file:
+      - .env
+    environment:
+      TEST_DATABASE_URL: ${TEST_DATABASE_URL:-postgresql://postgres:postgres@db-test:5432/device_manager_test}
+      DATABASE_URL: ${TEST_DATABASE_URL:-postgresql://postgres:postgres@db-test:5432/device_manager_test}
+    depends_on:
+      db-test:
+        condition: service_healthy
+    volumes:
+      - ./tests:/app/tests
+      - ./app:/app/app
+      - ./pytest.ini:/app/pytest.ini
+    command: pytest tests/ -v --tb=short
+
 volumes:
   postgres_data:
+  postgres_test_data:
