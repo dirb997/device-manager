@@ -205,4 +205,21 @@ class Database:
                     """, (status.value, now, now, device_id))
             conn.commit()
 
-db = Database()
+
+_db_instance = None
+
+def get_db():
+    """Get or create the database instance lazily."""
+    global _db_instance
+    if _db_instance is None:
+        _db_instance = Database()
+    return _db_instance
+
+
+class _LazyDB:
+    """Lazy proxy for the db instance to defer connection until needed."""
+    def __getattr__(self, name):
+        return getattr(get_db(), name)
+
+
+db = _LazyDB()

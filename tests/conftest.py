@@ -13,7 +13,6 @@ TEST_DATABASE_URL = os.getenv(
     "postgresql://postgres:postgres@localhost:5434/device_manager_test"
 )
 
-from app.main import app
 from app.database import Database
 
 
@@ -27,12 +26,36 @@ def event_loop_policy():
 def setup_test_db():
     """
     Set up test database before running tests.
-    Creates all necessary tables via the Database class.
+    Initializes schema and replaces the app's db instance with test database.
     """
-    # Initialize the test database
+    # Create and initialize the test database with schema
     test_db = Database(TEST_DATABASE_URL)
+    test_db.init_db()
+    
+    # Monkey-patch the app.database module to use test database
+    import app.database
+    original_get_db = app.database.get_db
+    
+    # Replace get_db to return our test instance
+    app.database.get_db = lambda: test_db
+    app.database._db_instance = test_db
+    
+    # Also patch any already-imported references in route modules
+    import app.routes.devices
+    import app.routes.auth
+    app.routes.devices.db = test_db
+    app.routes.auth.db = test_db
+    
+    # Patch auth.py if it imports db
+    import app.auth
+    if hasattr(app.auth, 'db'):
+        app.auth.db = test_db
     
     yield
+    
+    # Restore original database function
+    app.database.get_db = original_get_db
+    app.database._db_instance = None
     
     try:
         with test_db._connect() as conn:
@@ -49,8 +72,10 @@ def setup_test_db():
 async def client():
     """
     Provide an async HTTP client for testing API endpoints.
-    Automatically uses TEST_DATABASE_URL via environment variable.
+    The app uses the test database via monkey-patching in setup_test_db.
     """
+    from app.main import app
+    
     async with AsyncClient(app=app, base_url="http://test") as ac:
         yield ac
 
